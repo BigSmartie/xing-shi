@@ -1,0 +1,45 @@
+edition: 3.0.0
+name: ai-resume-analyzer
+access: default
+
+vars:
+  region: cn-hangzhou
+
+resources:
+  resume-api:
+    component: fc3
+    props:
+      region: ${vars.region}
+      functionName: ai-resume-analyzer
+      description: AI resume parsing and job matching API
+      runtime: custom.debian10
+      code: .
+      handler: not-used
+      timeout: 60
+      memorySize: 512
+      diskSize: 512
+      environmentVariables:
+        PYTHONPATH: /code
+        CACHE_DIR: /tmp/resume-cache
+      customRuntimeConfig:
+        command:
+          - python
+        args:
+          - -m
+          - uvicorn
+          - backend.app.main:app
+          - --host
+          - 0.0.0.0
+          - --port
+          - "9000"
+      triggers:
+        - triggerName: httpTrigger
+          triggerType: http
+          qualifier: LATEST
+          triggerConfig:
+            authType: anonymous
+            methods:
+              - GET
+              - POST
+              - OPTIONS
+

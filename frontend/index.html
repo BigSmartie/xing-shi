@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>智能简历分析系统</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app" class="app-shell" v-cloak>
+      <aside class="side-rail">
+        <div class="brand">
+          <span class="brand-mark">RA</span>
+          <div>
+            <strong>Resume Analyzer</strong>
+            <small>Recruiting Console</small>
+          </div>
+        </div>
+
+        <nav class="rail-nav" aria-label="报告视图">
+          <button
+            v-for="item in navItems"
+            :key="item.id"
+            type="button"
+            :class="{ active: activePanel === item.id }"
+            @click="activePanel = item.id"
+          >
+            <span>{{ item.label }}</span>
+            <b v-if="item.badge">{{ item.badge }}</b>
+          </button>
+        </nav>
+
+        <section class="service-card">
+          <div class="service-state">
+            <span :class="['status-dot', healthOk ? 'online' : 'offline']"></span>
+            <strong>{{ healthText }}</strong>
+          </div>
+          <label>
+            <span>后端服务地址</span>
+            <input v-model.trim="apiBase" type="url" @change="saveApiBase" />
+          </label>
+        </section>
+      </aside>
+
+      <main class="main-stage">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">AI Resume Screening</p>
+            <h1>候选人智能筛选工作台</h1>
+          </div>
+          <div class="top-actions">
+            <span class="model-pill">{{ aiStatusLabel }}</span>
+            <span class="model-pill">{{ extractionSource }}</span>
+          </div>
+        </header>
+
+        <section class="command-center">
+          <form class="intake-panel" @submit.prevent="submitResume(true)">
+            <div
+              class="upload-card"
+              :class="{ dragging: isDragging }"
+              @dragover.prevent="isDragging = true"
+              @dragleave.prevent="isDragging = false"
+              @drop.prevent="handleDrop"
+            >
+              <input
+                ref="fileInput"
+                type="file"
+                accept="application/pdf"
+                @change="handleFileChange"
+              />
+              <div class="upload-copy">
+                <span class="label">PDF 简历</span>
+                <strong>{{ selectedFile ? selectedFile.name : '选择或拖入候选人简历' }}</strong>
+                <small>{{ selectedFile ? formatFileSize(selectedFile.size) : '单个 PDF 文件' }}</small>
+              </div>
+              <button type="button" class="secondary-button" @click="chooseFile">选择文件</button>
+            </div>
+
+            <label class="jd-editor">
+              <span class="label">岗位需求</span>
+              <textarea
+                v-model.trim="jobDescription"
+                rows="8"
+                placeholder="请输入岗位需求..."
+              ></textarea>
+            </label>
+
+            <div class="action-row">
+              <button type="button" class="secondary-button" :disabled="loading" @click="submitResume(false)">
+                仅解析
+              </button>
+              <button type="submit" class="primary-button" :disabled="loading">
+                {{ loading ? '分析中...' : '生成筛选报告' }}
+              </button>
+            </div>
+          </form>
+
+          <section class="candidate-card">
+            <div class="candidate-head">
+              <div class="avatar">{{ candidateInitial }}</div>
+              <div>
+                <span class="label">候选人</span>
+                <h2>{{ candidateName }}</h2>
+                <p>{{ headline }}</p>
+              </div>
+            </div>
+
+            <div class="score-row">
+              <div class="score-meter" :style="{ '--score': scorePercent }">
+                <span>{{ match ? Math.round(match.score) : '--' }}</span>
+              </div>
+              <div>
+                <span class="label">综合结论</span>
+                <strong>{{ match ? match.recommendation : resume ? '已完成解析' : '等待上传' }}</strong>
+                <p>{{ match ? match.explanation : resumeSummary }}</p>
+              </div>
+            </div>
+
+            <dl class="contact-list">
+              <div v-for="item in contactItems" :key="item.label">
+                <dt>{{ item.label }}</dt>
+                <dd>{{ item.value }}</dd>
+              </div>
+            </dl>
+          </section>
+        </section>
+
+        <section class="stat-grid">
+          <article v-for="stat in stats" :key="stat.label" class="stat-card">
+            <span>{{ stat.label }}</span>
+            <strong>{{ stat.value }}</strong>
+            <small>{{ stat.caption }}</small>
+          </article>
+        </section>
+
+        <section v-show="activePanel === 'overview'" class="report-grid">
+          <article class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <span class="label">Candidate Profile</span>
+                <h2>候选人概览</h2>
+              </div>
+              <span class="tag">{{ resume ? `${resume.page_count || 0} 页简历` : '待解析' }}</span>
+            </div>
+            <dl class="profile-table">
+              <template v-for="row in profileRows" :key="row.label">
+                <dt>{{ row.label }}</dt>
+                <dd>{{ row.value }}</dd>
+              </template>
+            </dl>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <span class="label">AI Summary</span>
+                <h2>筛选摘要</h2>
+              </div>
+              <span class="tag">{{ extractionSource }}</span>
+            </div>
+            <p class="summary-text">{{ resumeSummary }}</p>
+            <div class="risk-list">
+              <div v-for="item in insightItems" :key="item.title" class="risk-item" :class="item.tone">
+                <strong>{{ item.title }}</strong>
+                <span>{{ item.body }}</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel panel-wide">
+            <div class="panel-head">
+              <div>
+                <span class="label">Experience Evidence</span>
+                <h2>项目经历</h2>
+              </div>
+              <span class="tag">{{ projects.length }} 项</span>
+            </div>
+            <div class="project-list">
+              <section v-for="project in projects" :key="project.name || project.description">
+                <div class="project-title">
+                  <h3>{{ project.name || '项目经历' }}</h3>
+                  <span v-if="project.role">{{ project.role }}</span>
+                </div>
+                <p>{{ project.description || '暂无描述' }}</p>
+                <div class="chips compact">
+                  <span v-for="tech in project.technologies" :key="tech">{{ tech }}</span>
+                </div>
+              </section>
+              <p v-if="!projects.length" class="empty-text">暂无项目经历结构化结果</p>
+            </div>
+          </article>
+        </section>
+
+        <section v-show="activePanel === 'match'" class="report-grid">
+          <article class="panel panel-large">
+            <div class="panel-head">
+              <div>
+                <span class="label">Matching Dimensions</span>
+                <h2>匹配维度</h2>
+              </div>
+              <span class="tag">{{ match ? '已评分' : '待匹配' }}</span>
+            </div>
+            <div class="metric-stack">
+              <div v-for="metric in metrics" :key="metric.label" class="metric-row">
+                <div>
+                  <strong>{{ metric.label }}</strong>
+                  <span>{{ metric.caption }}</span>
+                </div>
+                <div class="bar"><i :style="{ width: `${metric.value}%` }"></i></div>
+                <b>{{ metric.value.toFixed(1) }}</b>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <span class="label">Keyword Coverage</span>
+                <h2>关键词覆盖</h2>
+              </div>
+              <span class="tag">{{ keywordCoverage }}</span>
+            </div>
+            <div class="keyword-section">
+              <h3>已识别技能</h3>
+              <div class="chips">
+                <span v-for="skill in skills" :key="skill">{{ skill }}</span>
+                <em v-if="!skills.length">暂无</em>
+              </div>
+            </div>
+            <div class="keyword-columns">
+              <div>
+                <h3>岗位命中</h3>
+                <div class="chips success">
+                  <span v-for="item in matchedKeywords" :key="item">{{ item }}</span>
+                  <em v-if="!matchedKeywords.length">暂无</em>
+                </div>
+              </div>
+              <div>
+                <h3>待补充</h3>
+                <div class="chips danger">
+                  <span v-for="item in missingKeywords" :key="item">{{ item }}</span>
+                  <em v-if="!missingKeywords.length">暂无</em>
+                </div>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section v-show="activePanel === 'evidence'" class="panel evidence-panel">
+          <div class="panel-head">
+            <div>
+              <span class="label">Source Evidence</span>
+              <h2>原文证据</h2>
+            </div>
+            <span class="tag">{{ textLength }}</span>
+          </div>
+          <div class="section-list" v-if="sections.length">
+            <article v-for="section in sections" :key="section.title + section.content">
+              <h3>{{ section.title }}</h3>
+              <p>{{ section.content }}</p>
+            </article>
+          </div>
+          <pre>{{ resume?.full_text || resume?.text_preview || '暂无内容' }}</pre>
+        </section>
+
+        <section v-show="activePanel === 'json'" class="panel evidence-panel">
+          <div class="panel-head">
+            <div>
+              <span class="label">API Response</span>
+              <h2>JSON 结果</h2>
+            </div>
+            <span class="tag">{{ resume ? '已生成' : '待生成' }}</span>
+          </div>
+          <pre>{{ jsonResult }}</pre>
+        </section>
+      </main>
+
+      <div v-if="toast" class="toast">{{ toast }}</div>
+    </div>
+
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
