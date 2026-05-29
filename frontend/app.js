@@ -3,7 +3,7 @@ const { createApp } = Vue;
 createApp({
   data() {
     return {
-      apiBase: localStorage.getItem("resume-api-base") || "http://127.0.0.1:8000",
+      apiBase: localStorage.getItem("resume-api-base") || "https://ai-resuanalyzer-kpcqylmskg.cn-hangzhou.fcapp.run",
       activePanel: "overview",
       selectedFile: null,
       jobDescription: "",
